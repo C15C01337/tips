@@ -1,1 +1,122 @@
-<h1>Test</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>README Viewer</title>
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f9f9f9;
+      color: #333;
+      transition: background-color 0.3s, color 0.3s;
+    }
+
+    header {
+      background-color: #0s07bff;
+      color: #fff;
+      padding: 1rem;
+      text-align: center;
+      width: 100%;
+      top: 0;
+      left: 0;
+      z-index: 1000;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    main {
+      padding: 5rem 1rem 1rem;
+      max-width: 100%;
+      box-sizing: border-box;
+    }
+
+    #readme-container {
+      max-width: 100%;
+      margin: 0 auto;
+      padding: 1rem;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    h1, h2, h3 {
+      color: #333;
+    }
+
+    a {
+      color: #007bff;
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    pre, code {
+      display: block;
+      background: #f5f5f5;
+      border: 1px solid #ddd;
+      padding: 1rem;
+      border-radius: 4px;
+      overflow-x: auto; /* Ensure horizontal scroll if needed */
+      white-space: pre-wrap; /* Wrap long lines */
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow-x: auto;
+      display: block;
+    }
+
+    table, th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+    }
+
+    th {
+      background: #f9f9f9;
+    }
+
+    /* CSS Media Query to handle longer content */
+    @media (min-width: 800px) {
+      #readme-container.long-content {
+        overflow-x: auto;
+        word-wrap: break-word; /* Break long words */
+        white-space: pre-wrap; /* Ensure proper wrapping */
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Project forked from <a href = "https://github.com/w181496/Web-CTF-Cheatsheet"> Github </a></h1>
+  </header>
+  <main>
+    <div id="readme-container"></div>
+  </main>
+
+  <!-- Include marked.js -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script>
+    // const readmeUrl = 'https://raw.githubusercontent.com/C15C01337/tips/master/README.md';
+    const readmeUrl = 'https://raw.githubusercontent.com/riramar/Web-Attack-Cheat-Sheet/master/README.md';
+
+    fetch(readmeUrl)
+      .then(response => response.text())
+      .then(text => {
+        const readmeContainer = document.getElementById('readme-container');
+        readmeContainer.innerHTML = marked.parse(text);
+        
+        // Check if content is longer than a certain length and apply class if needed
+        if (text.length > 2000) { // Arbitrary length threshold
+          readmeContainer.classList.add('long-content');
+        }
+      })
+      .catch(error => console.error('Error fetching README:', error));
+  </script>
+</body>
+</html>
